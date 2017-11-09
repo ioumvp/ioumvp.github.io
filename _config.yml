@@ -1,2 +1,3 @@
 name: Xiang Bai, Half Machine
 markdown: kramdown
+permalink: /blog/:year/:month/:day/:title
