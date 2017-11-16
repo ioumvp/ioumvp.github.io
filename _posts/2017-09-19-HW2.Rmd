@@ -1,0 +1,415 @@
+---
+layout: post
+title: "HW2"
+author: "Xiang Bai"
+date: "9/19/2017"
+categories: EDA
+tags: association rules
+output: md_document: variant: markdown_github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages(c('arules', 'arulesViz', 'dplyr', 'dbplyr', 'lubridate'))
+library(arules)
+library(arulesViz)
+library(dplyr)
+library(tidyr)
+library(dbplyr)
+library(RSQLite)
+library(Hmisc)
+library(VIM)
+library(missForest)
+library(mice)
+library(data.table)
+library(lubridate)
+```
+
+
+# Homework 1: Association Rules
+
+For this assignment include all your R code in this R Markdown file to support your answer. Your code goes in the code "chunks" below. If you open this file in RStudio then you can run all the R code by clicking on the `Knit HTML` button. You can experiment with code in the R console and then paste your code into this document, or write it directly in this document and send it over to the console with the keyboard shortcut `command+enter` or `control+enter`. Please use the pipe operator to represent composite tasks when using dplyr.
+
+## Section 1: Purchase Patterns
+A drug store chain wants to learn more about cosmetics buyers purchase patterns.  Specifically, they want to know
+what items are purchased in conjunction with each other, for purposes of display, point of sale special offers, and to
+eventually implement a real time recommender system to cross-sell items at time of purchase. The data are in the form 
+of a matrix in which each column represents a product group, and each row a customer transaction. Follow the steps 
+outline to explore this data and provide insights for the chain.
+
+1. Load the dataset `cosmetics.csv` from moodle into a dataframe called `cosmetics`. Display the first 12 rows (Trans number 1-12) and the first 8 columns (Trans#, Bag, Brush, ..., Bronzer) of the dataframe.
+```{r}
+cosmetics <- tbl_df(read.csv('cosmetics.csv', header=TRUE))
+cos_lite <- cosmetics[1:12,1:8]
+cos_lite
+```
+
+
+2. Based only on data from these 12 rows and 8 columns, list all the frequent item sets along with their support with min_support as 30%. Use the property of anti-monotonicity to save you from considering every possible itemset.
+```{r}
+# Setting min_support at 30%, a frequent item set should have at least 4 counts across this 12x7 dataset. So the first goal is to find out item set(s) which has at least 4 counts and contains as many items as possible.
+
+# According to anti-monotonicity property, let's first pick out the single item that has at least 4 counts. Candidates are Blush(5), Nail.Polish(8), Brushes(6), Concealer(9), Bronzer(9). With that, Bag and Eyebrow.Pencils can be safely ignored.
+
+# Next, let's take a closer look at the 5 candidates altogether and find out item set(s) that can contain as many items within these 5 candidates as possible. What's more, each of the item sets should not be a superset or subset of any other. 
+# (Nail.Polish + Brushes + Concealer + Bronzer) has 4 counts. Any subset is also a frequent item set.
+# (Blush + Nail.Polish + Brushes) has 4 counts. Any subset is also a frequent item set.
+# (Blush + Concealer + Bronzer) has 4 counts. Any subset is also a frequent item set.
+```
+
+  * Itemsets of cardinality 1: {Blush}, {Nail.Polish}, {Brushes}, {Concealer}, {Bronzer}
+  * Itemsets of cardinality 2: {Blush, Nail.Polish}, {Blush, Brushes}, {Blush, Concealer}, {Blush, Bronzer}, {Nail.Polish, Brushes}, {Nail.Polish, Concealer}, {Nail.Polish, Bronzer}, {Brushes, Concealer}, {Brushes, Bronzer}, {Concealer, Bronzer}
+  * Itemsets of cardinality 3: {Blush, Nail.Polish, Brushes}, {Blush, Nail.Polish, Concealer}, {Blush, Nail.Polish, Bronzer}, {Blush, Brushes, Concealer}, {Blush, Brushes, Bronzer}, {Blush, Concealer, Bronzer}, {Nail.Polish, Brushes, Concealer}, {Nail.Polish, Brushes, Bronzer}, {Nail.Polish, Concealer, Bronzer}, {Brushes, Concealer, Bronzer}
+  * Itemsets of cardinality 4: {Blush, Nail.Polish, Brushes, Concealer}, {Blush, Nail.Polish, Brushes, Bronzer}, {Blush, Nail.Polish, Concealer, Bronzer}, {Blush, Brushes, Concealer, Bronzer}, {Nail.Polish, Brushes, Concealer, Bronzer}
+  * Itemsets of cardinality 5: {Blush, Nail.Polish, Brushes, Concealer, Bronzer}
+
+
+3. Turn the cosmetics dataframe into an item_matrix, be sure to exclude the trans column, and list the percentage support for each invidual (single) item.
+```{r}
+cosmetics_matrix <- data.matrix(cosmetics[,2:15])
+cosmetics_matrix <- as(cosmetics_matrix, 'itemMatrix')
+itemFrequencyPlot(cosmetics_matrix, type='relative')
+```
+
+
+4. Run the apriori algorithm with support of 0.25 and confidence of 0.8, and inspect the rules returned
+```{r}
+rules1 <- apriori(cosmetics_matrix, parameter=list(supp=0.25,conf=0.8))
+options(digits=2)
+summary(rules1)
+rules1 <- sort(rules1, by='support', decreasing=TRUE)
+inspect(rules1)
+```
+
+
+5. For the rules returned (there should only be two)
+    + Explain what confidence is capturing and how it is calulcated
+      **Confidence: It captures the likelihood of one event happening given another event has happened. For example, given mascara being purchased, the probability of purchasing eye shadow is 0.90. To get this, number of records containing both mascara and eye shadow is divided by number of records containing just mascara.**
+    + Explain what support is capturing and how it is calulcated. Also state the support for the individual items coantined in the rules.
+      **Support: It captures the frequency of an item, or a set of items among all possible items or sets of items. For example, the number of records containing both mascara and eye shadow accounts for 32% in all the transaction records. To get this, number of records containing both mascara and eye shadow is divided by total number of transaction records.**
+    + Explain what lift is capturing, how it is calulcated.
+      **Lift: It captures how much more frequently does a certain association occur than we would expect by chance. To get this number, the probability that the association occurs is divided by the probability that each of the items in the association occurs together if they were independent.**
+    + Explain the rules in words
+      **1. Among all the customers who purchased mascara, 90% of them also purchased eye shadow. This association accounts for 32% of all transactions that have been made. It is 2.4 times more frequently that this association occur than we would expect by chance.**
+      **2. Among all the customers who purchased eye shadow, 84% of them also purchased mascara. This association accounts for 32% of all transactions that have been made. It is 2.4 times more frequently that this association occur than we would expect by chance.** 
+    + Explain why there so few rules returned by the apriori algorithm and what can we do if we want to have more rules to inspect.
+      **Support and confidence could be lowered to allow more association rules to appear.**
+    
+    
+6. Run the apriori algorithm with support of 0.05 and confidence of 0.5, and provide a summary of the rules discoverd. Use the `plot` function (from the `arulesViz` package) to visualize a scatter plot of the rules based on their quality metrics. See this [link](https://cran.r-project.org/web/packages/arulesViz/vignettes/arulesViz.pdf) as refernce for the arulesViz 
+    package.
+```{r}
+rules2 <- apriori(cosmetics_matrix, parameter=list(supp=0.05,conf=0.5))
+options(digits=2)
+summary(rules2)
+plot(rules2, measure=c('support', 'lift'), shading='confidence')
+```
+
+
+7. Inspect the top 10 rules sorted by confidence. Also inspect the top 10 rules sorted by lift and support simaltenously (but in that order). Hint: You can supply the `by` paramter in `sort` an vector. Summarize in words, what you observe in these top-10 rules
+```{r}
+inspect(sort(rules2, by =c('confidence','lift','support'))[1:10])
+```
+*Conclusion: It is a strong association rule that people who purchased brushes would also purchase nail polish.*
+
+
+## Section 2: Sports Analytics
+
+As data continue to ubiquitous with competitive across firms and industries, data analytics has found a home in increasingly less common organizations. Potentially sparked by (money ball)[https://en.wikipedia.org/wiki/Moneyball], sports analytics is on the rise to the extent that many major sports teams have data scientist on staff to help give the team an edge over the competition. To that end you have been hired by *FC Barcelona* to be the resident data scientist. The coach of the team wants you to find patterns that he can exploit to increase success on the field and decrease failure; specifically, he wants to find non-obvious patterns because his years of experience have taught him many of the obvious ones. He suggest that you use association rules because he once heard how Walmart used them to find an non-obvious pattern and sell more pop-tarts during hurricans. At first you think his request does not make sense because association rules are traditionally used to analyze purchases, but then you realize the coach may be on to something and set out to see what patterns you can uncover! You have been provided data (`euro_soccer.sqlite`) corresponding to matches played between european soccer teams from 2008 to 2016, as well as information concerning the teams and players. More information concerning the data can be found (here)[https://www.kaggle.com/hugomathien/soccer]. Additional information on how to use dplyr to munge data in database can be found (here)[https://db.rstudio.com/dplyr/]; I provide some starting point below.
+
+Remember, your audience here is a non-technical person, so although you must show your techincal results, you also must interpret their implications for managerial decision making. You are welcome to use any methods for analysis you have learned; however, association rules must be a central piece of your approach. Recall that in order to use association rules you need to clearly define your "items", your "transactions", and measure of being "selected" (into the basket). For example your transaction can be matches, while items can be players (where selection can be playing in the match), match outcomes (where selection can be if the team won the match), and betting odds of winning (where selection can be if the odds where not in your favor), such an analysis could help you understand which players on the field tend to correspond to your team winning games that they were likely to lose. Furthermore, instead of consider players specifically, you could consider items to be particular player characteristics (e.g., speed).  This is merely one potential idea; rememeber there are many ways to analayze data and many pattersn to find, so be creative and think outside the box.  However, as is always the case, you should not just jump into the analysis, so first *Think it -> describe it -> do it -> interpret it*.  Finally, remember that your *narrative is key* because your analysis should tell a story. Check (here)[https://www.kaggle.com/hugomathien/soccer] for more information about the data.
+
+*Answer below*
+
+In the next 2-3 pages, I would like to reveal some non-trivial patterns on individual and team level to help the manager increase overall winning chance for FC Barcelona. To begin with, I'll briefly outline the aspects we deem critical to match result. 
+
+1. Formation
+The overall team formation and star player's own position can have impact on match results.
+2. Tactics
+Team tactics can be elaborated into many aspects such as passing, positioning, defence pressure, defender line, and so on. Tactics should be evaluated considering both teams. 
+3. Participation
+It is defined as how a player puts effort to participate in attacks and defenses even when they are out of position. The two critical attributes are attacking work rate and defensive work rate.
+
+
+Connecting to the database from R
+```{r echo=FALSE}
+#dir = "/Users/emcfowla/Dropbox/Documents/Academic/Faculty/Teaching/Fall 2017/MSBA 6410/Homeworks/Homework 2/HW 2"
+#setwd(dir)
+con <- src_sqlite("euro_soccer.sqlite")
+
+long_team_name <- 'Barcelona'
+#each of the following tables are just dbplyr connections to the database tables
+#if or when I need to bring the table to local memory I need to run table <- collect(table)
+country_tbl <- tbl(con, "country")
+league_tbl <- tbl(con, "league")
+match_tbl <- tbl(con, "match")
+player_tbl <- tbl(con, "player")
+player_atts_tbl <- tbl(con, "player_attributes")
+player_atts_tbl
+team_tbl <- tbl(con, "team")
+team_atts_tbl <- tbl(con, "team_attributes")
+
+barca_record <- team_tbl %>% 
+                collect() %>%
+                filter(grepl(long_team_name, team_long_name))
+
+home_matches <- filter(match_tbl, home_team_api_id==barca_record$team_api_id)
+away_matches <- filter(match_tbl, away_team_api_id==barca_record$team_api_id)
+
+results_home <- home_matches %>% 
+                    mutate(goal_diff = home_team_goal - away_team_goal) %>% 
+                    select(id, goal_diff) %>%
+                    rename(match_id = id)
+
+results_away <- away_matches %>% 
+                    mutate(goal_diff = away_team_goal - home_team_goal) %>% 
+                    select(id, goal_diff) %>%
+                    rename(match_id = id)
+```
+
+
+1. Formation
+- Preparing the table containing match results, teams formation, and players position
+```{r}
+formations_results_home <- select(home_matches,c(1,12:22,23:33,34:44,45:55,56:66,67:77)) %>% collect()
+formation_b <- 0
+formation_m <- 0
+formation_f <- 0
+formation_bo <- 0
+formation_mo <- 0
+formation_fo <- 0
+for (i in seq(1,152)) {
+  for (j in seq(1,10)) {
+    formations_results_home[i,67+j] <- paste(formations_results_home[i,46+j], formations_results_home[i,2+j], formations_results_home[i,24+j], sep=',')
+    if (formations_results_home[i,24+j]>1 & formations_results_home[i,24+j]<4) {
+      formation_b <- formation_b+1}
+    if (formations_results_home[i,24+j]>=4 & formations_results_home[i,24+j]<=8) {
+      formation_m <- formation_m+1}
+    if (formations_results_home[i,24+j]>8 & formations_results_home[i,24+j]<=11) {
+      formation_f <- formation_f+1}
+    if (formations_results_home[i,35+j]>1 & formations_results_home[i,35+j]<4) {
+      formation_bo <- formation_bo+1}
+    if (formations_results_home[i,35+j]>=4 & formations_results_home[i,35+j]<=8) {
+      formation_mo <- formation_mo+1}
+    if (formations_results_home[i,35+j]>8 & formations_results_home[i,35+j]<=11) {
+      formation_fo <- formation_fo+1}
+  }
+  formations_results_home$format[i] <- paste(formation_b, formation_m, formation_f, sep='-')
+  formations_results_home$formato[i] <- paste(formation_bo, formation_mo, formation_fo, sep='-')
+  formation_b <- 0
+  formation_m <- 0
+  formation_f <- 0
+  formation_bo <- 0
+  formation_mo <- 0
+  formation_fo <- 0
+}
+formations_results_home <- select(formations_results_home,c(1,68:79)) %>% left_join(results_home, by=c('id'='match_id'), copy=TRUE)
+
+formations_results_away <- select(away_matches,c(1,12:22,23:33,34:44,45:55,56:66,67:77)) %>% collect()
+formation_b <- 0
+formation_m <- 0
+formation_f <- 0
+formation_bo <- 0
+formation_mo <- 0
+formation_fo <- 0
+for (i in seq(1,152)) {
+  for (j in seq(1,10)) {
+    formations_results_away[i,67+j] <- paste(formations_results_away[i,57+j], formations_results_away[i,13+j], formations_results_away[i,35+j], sep=',')
+    if (formations_results_away[i,24+j]>1 & formations_results_away[i,24+j]<4) {
+      formation_bo <- formation_bo+1}
+    if (formations_results_away[i,24+j]>=4 & formations_results_away[i,24+j]<=8) {
+      formation_mo <- formation_mo+1}
+    if (formations_results_away[i,24+j]>8 & formations_results_away[i,24+j]<=11) {
+      formation_fo <- formation_fo+1}
+    if (formations_results_away[i,35+j]>1 & formations_results_away[i,35+j]<4) {
+      formation_b <- formation_b+1}
+    if (formations_results_away[i,35+j]>=4 & formations_results_away[i,35+j]<=8) {
+      formation_m <- formation_m+1}
+    if (formations_results_away[i,35+j]>8 & formations_results_away[i,35+j]<=11) {
+      formation_f <- formation_f+1}
+  }
+  formations_results_away$format[i] <- paste(formation_b, formation_m, formation_f, sep='-')
+  formations_results_away$formato[i] <- paste(formation_bo, formation_mo, formation_fo, sep='-')
+  formation_b <- 0
+  formation_m <- 0
+  formation_f <- 0
+  formation_bo <- 0
+  formation_mo <- 0
+  formation_fo <- 0
+}
+formations_results_away <- select(formations_results_away,c(1,68:79)) %>% left_join(results_away, by=c('id'='match_id'), copy=TRUE)
+
+formations_results <- rbind(formations_results_home, formations_results_away)
+
+formations_results$score <- c(0)*304
+formations_results$score[formations_results$goal_diff>0] <- 3
+formations_results$score[formations_results$goal_diff==0] <- 1
+formations_results$score[formations_results$goal_diff<0] <- 0
+```
+
+- Findouts: Barca is especially good at dealing with opponents of 4-5-1 formation. Key players such as Daniel Alves, Puyol, Xavi, Iniesta, Messi, and Neymar are strongly associated with the winning matches. One of the possible explanations is that the single center forward of the opponent team cannot cast enough threat to Barca's defence system represented by the world-class defender such as Puyol, Pique, and Alves. On the other side of the field, Barca's powerful attacking weapon ensures a sufficient number of goals to win the match.
+```{r}
+formations_results_matrix <- select(formations_results, c(V68,V69,V70,V71,V72,V73,V74,V75,V76,V77,formato,score))
+cols <- c('V68','V69','V70','V71','V72','V73','V74','V75','V76','V77','formato','score')
+formations_results_matrix[cols] <- lapply(formations_results_matrix[cols], factor)
+formations_results_matrix <- model.matrix(~., data=formations_results_matrix)[,-1]
+formations_results_matrix <- as(formations_results_matrix, "itemMatrix")
+formations_results_rules <- apriori(formations_results_matrix, parameter=list(supp=0.1,conf=0.2))
+formations_results_rules <- subset(formations_results_rules, subset = (rhs %pin% 'score3'))
+formations_results_rules <- sort(formations_results_rules, by=c('lift','support'), decreasing=TRUE)
+options(digits=2)
+inspect(formations_results_rules[1:10])
+```
+
+
+2. Tactics
+- Preparing the table of match results and teams tactics
+```{r}
+# Merge opponent teams information and match results (line 255-288)
+barca_tactics <- team_atts_tbl %>% 
+                collect() %>%
+                filter(team_api_id==8634) %>%
+                mutate(match_year=year(date))
+                       
+tactics_results_home <- 
+    select(home_matches, match_id=id, match_date=date, away_team_api_id) %>%
+    collect() %>%
+    mutate(match_year=year(match_date)) %>%
+    left_join(barca_tactics %>%
+              select(-one_of(c('id','team_fifa_api_id','date'))), 
+              by='match_year') %>%
+    left_join(team_tbl %>%
+              select(-one_of(c('id','team_fifa_api_id','team_short_name'))),
+              by=c('away_team_api_id'='team_api_id'), copy=TRUE) %>%
+    rename(opponent_team_api_id = away_team_api_id, opponent_team_name=team_long_name) %>%
+    left_join(team_atts_tbl %>%
+              select(-one_of(c('id','team_fifa_api_id'))) %>%
+              collect() %>%
+              mutate(rating_year=as.numeric(year(date))),
+              by=c('match_year'='rating_year', 'opponent_team_api_id'='team_api_id'), copy=TRUE) %>%
+    left_join(results_home, by='match_id', copy=TRUE)
+
+tactics_results_away <- 
+    select(away_matches, match_id=id, match_date=date, home_team_api_id) %>%
+    collect() %>%
+    mutate(match_year=year(match_date)) %>%
+    left_join(barca_tactics %>%
+              select(-one_of(c('id','team_fifa_api_id','date'))), 
+              by='match_year') %>%
+    left_join(team_tbl %>%
+              select(-one_of(c('id','team_fifa_api_id','team_short_name'))),
+              by=c('home_team_api_id'='team_api_id'), copy=TRUE) %>%
+    rename(opponent_team_api_id = home_team_api_id, opponent_team_name=team_long_name) %>%
+    left_join(team_atts_tbl %>%
+              select(-one_of(c('id','team_fifa_api_id'))) %>%
+              collect() %>%
+              mutate(rating_year=as.numeric(year(date))),
+              by=c('match_year'='rating_year', 'opponent_team_api_id'='team_api_id'), copy=TRUE) %>%
+    left_join(results_away, by='match_id', copy=TRUE)
+
+tactics_results <- rbind(tactics_results_home, tactics_results_away)
+tactics_results$score <- c(0)*304
+tactics_results$score[tactics_results$goal_diff>0] <- 3
+tactics_results$score[tactics_results$goal_diff==0] <- 1
+tactics_results$score[tactics_results$goal_diff<0] <- 0
+
+# Dealing with missing values
+tactics_results <- tactics_results[!(tactics_results$match_year==2008 | tactics_results$match_year==2009 | tactics_results$match_year==2016),] # There are 75 rows where opponent team has no ratings at all. Removing these teams since it cannot give any insight in further analysis.
+```
+
+- Findouts: Compared to its opponents, Barcelona typically builds up play at a more balanced speed, rather than either too slow or too fast. The ability to conduct a balanced build up play has help Barcelona maintain great and effective possession. With this tactic, they have had great success especially during 2009-2011 seasons. Besides, Barcelona keeps a much wider team width so that they have the space to do passing and build up the play more freely.
+```{r}
+tactics_results_matrix <- select(tactics_results, c(7,9,11,12,14,16,18,19,21,23,25,26,30,32,34,35,37,39,41,42,44,46,48,49,score))
+cols <- c('buildUpPlaySpeedClass','buildUpPlayDribblingClass','buildUpPlayPassingClass','buildUpPlayPositioningClass','chanceCreationPassingClass','chanceCreationCrossingClass','chanceCreationShootingClass','chanceCreationPositioningClass','defencePressureClass','defenceAggressionClass','defenceTeamWidthClass','defenceDefenderLineClass')
+tactics_results_matrix[cols] <- NA
+for (i in seq(1,229)) {
+  for (j in seq(1,12)) {
+    tactics_results_matrix[i,j+25] <- paste(tactics_results_matrix[i,j],tactics_results_matrix[i,j+12],sep=' vs ')
+  }
+}
+tactics_results_matrix[cols] <- lapply(tactics_results_matrix[cols], factor)
+tactics_results_matrix$score <- factor(tactics_results_matrix$score)
+tactics_results_matrix <- select(tactics_results_matrix,c(25:37))
+tactics_results_matrix <- model.matrix(~., data=tactics_results_matrix)[,-1]
+tactics_results_matrix <- as(tactics_results_matrix, "itemMatrix")
+tactics_results_rules <- apriori(tactics_results_matrix, parameter=list(supp=0.01,conf=0.2))
+tactics_results_rules <- subset(tactics_results_rules, subset = (rhs %pin% 'score3'))
+tactics_results_rules <- sort(tactics_results_rules, by=c('lift','support'), decreasing=TRUE)
+options(digits=2)
+inspect(tactics_results_rules[1:10])
+```
+
+
+3. Participation
+- Preparing the table of match results and player attributes
+```{r}
+# Merge players information and match results
+players_results_home <- 
+    select(home_matches, match_id=id, match_date=date, matches('home_player_[[:digit:]]')) %>% # select columns of id(match id) and 11 line-up players
+    collect() %>%
+    mutate(match_year=as.numeric(year(match_date))) %>% 
+    gather(player, player_api_id, -c(match_id, match_year, match_date)) %>% # transpose the above (304,13) matrix into (1672,3) matrix--rows of each player of each match, columns of id(match id), player, player_api_id
+    left_join(player_tbl, by='player_api_id', copy=TRUE) %>% # get age of player on match day
+    mutate(player_age=as.numeric((as.Date(match_date)-as.Date(birthday))/365.25)) %>%
+    left_join(player_atts_tbl %>% 
+              select(-one_of(c('player_fifa_api_id','id'))) %>%
+              mutate(rating_year=as.numeric(substr(date,1,4))) %>% 
+              collect() %>% 
+              group_by(player_api_id,rating_year) %>% slice(which.min(overall_rating)), 
+              by=c('match_year'='rating_year', 'player_api_id'), copy=TRUE) %>% # join player information for each of the home players in each match
+    left_join(results_home, by='match_id', copy=TRUE) # add the target variable column which is the goal difference of each match
+
+players_results_away <- select(away_matches, match_id=id, match_date=date, matches('away_player_[[:digit:]]')) %>% # select columns of id(match id) and 11 line-up players
+    collect() %>%
+    mutate(match_year=as.numeric(year(match_date))) %>% 
+    gather(player, player_api_id, -c(match_id, match_year, match_date)) %>% # transpose the above (304,13) matrix into (1672,3) matrix--rows of each player of each match, columns of id(match id), player, player_api_id
+    left_join(player_tbl, by='player_api_id', copy=TRUE) %>% # get age of player on match day
+    mutate(player_age=as.numeric((as.Date(match_date)-as.Date(birthday))/365.25)) %>%
+    left_join(player_atts_tbl %>% 
+              select(-one_of(c('player_fifa_api_id','id'))) %>%
+              mutate(rating_year=as.numeric(substr(date,1,4))) %>% 
+              collect() %>% 
+              group_by(player_api_id,rating_year) %>% slice(which.min(overall_rating)), 
+              by=c('match_year'='rating_year', 'player_api_id'), copy=TRUE) %>% # join player information for each of the home players in each match
+    left_join(results_away, by='match_id', copy=TRUE) # add the target variable column which is the goal difference of each match
+
+players_results <- rbind(players_results_home, players_results_away) %>%
+                         select(-one_of(c('player','id','birthday','player_fifa_api_id','match_date','date')))
+players_results$score <- c(0)*3324
+players_results$score[players_results$goal_diff>0] <- 3
+players_results$score[players_results$goal_diff==0] <- 1
+players_results$score[players_results$goal_diff<0] <- 0
+
+# Dealing with missing values
+players_results <- filter(players_results, !is.na(players_results$player_api_id)) # There are 20 missing pieces of data concerning player information including player_api_id, player_name, player_fifa_api_id, height, weight, player_age. I suggest remove them all because they don't account for a significant portion of the dataset.
+
+# There are 120 missing values in player overall rating and ratings of every skill broken down. They all happen in 2016. It might be because FIFA didn't have this information when it was merged to the current dataset. I decide to impute them using random resampling based on player's distribution of ratings from other years.
+imp.random <- function (a){
+  missing <- is.na(a)
+  n.missing <- sum(missing)
+  a.obs <- a[!missing]
+  imputed <- a
+  imputed[missing] <- sample (a.obs, n.missing, replace=TRUE)
+  return (imputed)
+} 
+cols <- c('overall_rating','potential','preferred_foot','attacking_work_rate','defensive_work_rate','crossing','finishing','heading_accuracy','short_passing','volleys','dribbling','curve','free_kick_accuracy','long_passing','ball_control','acceleration','sprint_speed','agility','reactions','balance','shot_power','jumping','stamina','strength','long_shots','aggression','interceptions','positioning','vision')
+players_results[cols] <- lapply(players_results[cols], imp.random)
+```
+
+- Findouts: It is not suprising that forward and middle field players have a high or medium attacking rate. It is suprising and valuable to learn, though, that the key to winning also, to some extent, rely on defender putting efforts to get involved in attacks, such as Maxwell and Puyol, and forward players putting efforts to get involved in defence, such as Villa, Pedro and Messi.
+```{r}
+players_results$AWR <- paste(players_results$player_name, players_results$attacking_work_rate, sep=',')
+players_results$DWR <- paste(players_results$player_name, players_results$defensive_work_rate, sep=',')
+players_results_matrix <- players_results %>% select(one_of('AWR', 'DWR', 'score')) %>% as.data.frame
+cols <- c('AWR', 'DWR', 'score')
+players_results_matrix[cols] <- lapply(players_results_matrix[cols], factor)
+players_results_matrix <- model.matrix(~., data=players_results_matrix)
+players_results_matrix <- as(players_results_matrix, "itemMatrix")
+players_results_rules <- apriori(players_results_matrix, parameter=list(supp=0.01,conf=0.1))
+players_results_rules <- subset(players_results_rules, subset=(lhs %pin% 'AWR' & rhs %pin% 'score3'))
+players_results_rules <- sort(players_results_rules, by=c('lift','support'), decreasing=TRUE)
+inspect(players_results_rules[1:20])
+```
+
+
+Conclusion: Barcelona has been successful throughout these years because 1) They have a balanced 4-3-3 formation with powerful weapon in every area on the field. This formation is especially destructive when faced with opponents with 4-5-1 formation, 2) They diligently implement a balanced build up play speed and wide team width. This enables the team to maintain great and effective amount of ball possession, 3) Teammates assist each other doing the job they are not originally entitled, for example, defenders sometimes get themselves involved in attacking event, making the already powerful weapon even more powerful. 
