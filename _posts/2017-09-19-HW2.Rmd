@@ -1,5 +1,11 @@
 ---
 layout: post
+title: "A Little EDA"
+date: 2017-09-19
+---
+
+---
+layout: post
 title: "A little EDA"
 author: "Xiang Bai"
 date: 2017-09-19
