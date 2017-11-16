@@ -1,8 +1,8 @@
 ---
 layout: post
-title: "HW2"
+title: "A little EDA"
 author: "Xiang Bai"
-date: "9/19/2017"
+date: 2017-09-19
 categories: EDA
 tags: association rules
 output: md_document: variant: markdown_github
