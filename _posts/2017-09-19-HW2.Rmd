@@ -4,15 +4,14 @@ title: "A Little EDA"
 date: 2017-09-19
 ---
 
----
-layout: post
-title: "A little EDA"
-author: "Xiang Bai"
-date: 2017-09-19
-categories: EDA
-tags: association rules
-output: md_document: variant: markdown_github
----
+This is a Demo
+## Header 2
+### Header 3
+#### Header 4
+* A bulletted list
+- alternative syntax 1
++ alternative syntax 2
+  - an indented list item
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
